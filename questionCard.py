@@ -45,6 +45,7 @@ class QuestionCard(object):
 		self.rotated = None
 		self.rotatedGary = None
 		self.leftPosBlock, self.rightPosBlock = None, None
+		self.subjective_scores = list()
 	
 	''' 加载配置文件，并初始化一些值 '''
 	def load_setting(self, settingJson):
@@ -60,13 +61,20 @@ class QuestionCard(object):
 		# 加载图片，将它转换为灰阶
 		img = cv2.imread(self.img)
 		gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-		gray = cv2.bitwise_not(gray)
+		self.gray = cv2.bitwise_not(gray)
 		# 二值化，图片黑白色反转
-		thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
+		# h, w = img.shape[:2]
+		# cv2.imwrite('test.jpg', gray[h//10:h//5, w*5//12:w*3//4])
+		thresh = cv2.threshold(self.gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
+
 		# 得到旋转角度
-		coords = np.column_stack(np.where(thresh > 0))
-		angle = cv2.minAreaRect(coords)[-1]
-		angle = -(90 + angle) if angle < -45 else -angle
+		# coords = np.column_stack(np.where(thresh > 0))
+		# angle = cv2.minAreaRect(coords)[-1]
+		# angle = -(90 + angle) if angle < -45 else -angle
+
+		angle = -get_angle(thresh) / np.pi * 180
+		print(angle)
+		# angle = 0
 		# 执行仿射变换对倾斜角度校正
 		h, w = img.shape[:2]
 		center = (w // 2, h // 2)
@@ -110,22 +118,20 @@ class QuestionCard(object):
 
 		for qr in questionRect:
 			mid_x = (qr[0] + qr[0] + qr[2]) // 2    # 填涂区域的中心横向位置 (x + (x + w)) / 2
+			# print(qr[3])
 			for i, op in enumerate(options):
-				if op[0] < mid_x < op[1]:
+				if op[0] < mid_x < op[1] and 20 < qr[3]:    # 中心位置确定选项，高度用来过滤意外的杂项
 					self.answer.setdefault((row_no - 1) * self.col + i // 4 + 1, []).append(answerDict.get(i % 4 + 1))
 
 	''' 得到客观题答案 '''
-	def option_question(self):
-		self.get_pos_block()
-		# 左右定位块数量不等，或定位块对数少于客观题的行数（后者仅针对横向填涂答题卡），抛出异常
-		if len(self.leftPosBlock) != len(self.rightPosBlock) or len(self.leftPosBlock) < self.row:
-			raise UserWarning('定位异常，请检测该答题卡')
+	def get_option_question(self):
+		
 		# 根据题目定位块和指定的题目行列数截取每一行题目，如果一对定位块上下位置相差过大则抛出异常
 		for i in range(self.row):
 			lx, ly, lw, lh = self.leftPosBlock[i]
 			rx, ry, rw, rh = self.rightPosBlock[i]
 
-			if max(ly+lh, ry+rh) - min(ly, ry) > max(lh, rh) + 40:
+			if max(ly+lh, ry+rh) - min(ly, ry) > max(lh, rh) + 30:
 				raise UserWarning('定位异常，请检测该答题卡')
 
 			start = self.left_base_x - (self.left_crop_width - (lx + lw))
@@ -139,7 +145,67 @@ class QuestionCard(object):
 			
 			self.getAnswer(cropQuestion.shape[1], questionRect, i + 1)
 
-		return self.answer
+		# return self.answer
+
+	''' 得到主观题的得分 '''
+	''' type是指选择题下面开始的主观题，还是反面一开始就是主观题 '''
+	def get_subjective_score(self, _type=0, grid=21, num=21):
+		start_index = 0 if _type else self.row
+		end_index = len(self.leftPosBlock)
+		
+		for i in range(start_index, end_index):
+			lx, ly, lw, lh = self.leftPosBlock[i]
+			rx, ry, rw, rh = self.rightPosBlock[i]
+
+			if max(ly+lh, ry+rh) - min(ly, ry) > max(lh, rh) + 30:
+				raise UserWarning('定位异常，请检测该答题卡')
+
+			start = self.left_base_x - (self.left_crop_width - (lx + lw)) + lw // 2 
+			end = self.right_base_x + rx - rw // 2
+			sl = slice(ry, ry+rh)
+			cropSubjective = self.rotated[sl, start:end]
+			cropSubjectiveGray = self.rotatedGary[sl, start:end]
+
+			h, w = cropSubjective.shape[:2]
+			unit = w // grid
+			# print('subjective{}:'.format(i+1))
+			option_score, wait_for_select = list(), list()
+			for j in range(grid):
+				s = w - unit * (j+1) + 5
+				e = w - unit * j - 15
+				# print([cropSubjectiveGray[j, i] for j in range(0+1, 0+h) for i in range(s+1, e)])
+				cv2.rectangle(cropSubjective, (s, 0), (e, h), (0, 0, 255), 2)
+				ave_gray = aveGray(cropSubjectiveGray, s, 0, e - s, h)
+				if ave_gray > 10:
+					option_score.append(j)
+					if ave_gray > 40:
+						wait_for_select.append(j)
+				else:
+					break
+			
+			if len(wait_for_select) != 1:
+				raise UserWarning('主观题分数异常，请检测该答题卡')
+			self.subjective_scores.append(wait_for_select[0])
+			cv2.imwrite('CropSubjective{}.jpg'.format(i+1), cropSubjective)
+
+		# return self.subjective_scores
+
+	''' 判断是一份试卷的正面还是反面（也有可能有大于两页），并计算总得分 '''
+	def get_grade(self):
+		self.get_pos_block()
+		# 左右定位块数量不等，或定位块对数少于客观题的行数（后者仅针对横向填涂答题卡），抛出异常
+		if len(self.leftPosBlock) != len(self.rightPosBlock) or len(self.leftPosBlock) < self.row:
+			raise UserWarning('定位异常，请检测该答题卡')
+		h, w = self.rotatedGary.shape
+		# 判断是试卷哪一页
+		if self.left_base_x > w - self.right_base_x:
+			self.get_option_question()
+			print('客观题填涂答案已成功获取！')
+			self.get_subjective_score()
+			print('主观题分数已成功获取！')
+		else:
+			self.get_subjective_score(_type=1)
+			print('主观题分数已成功获取！')
 
 
 ''' 计算指定区域内平均灰度 '''
@@ -156,7 +222,7 @@ def detectRect(img, grayimg, imgName='', width=30, threshold=200, sortkey=0):
 	# 将所有轮廓用矩形框出，大于一定宽度并且区域内灰度平均值大于阈值的，就是需要的定位块或者填涂块
 	for c in contours:
 		x, y, w, h = cv2.boundingRect(c)
-		if w > width and aveGray(grayimg, x, y, w, h) > threshold:
+		if h > 10 and w > width and aveGray(grayimg, x, y, w, h) > threshold:
 			cv2.rectangle(img, (x, y), (x + w, y + h), (0, 0, 255), 2)
 			posBlock.append((x, y, w, h))
 	# 保存相应的灰度图像和带矩形标记的BGR图
@@ -165,13 +231,38 @@ def detectRect(img, grayimg, imgName='', width=30, threshold=200, sortkey=0):
 	return sorted(posBlock, key=lambda pb: pb[sortkey])
 
 
+def get_lines(bimg, threshold=700):
+    lines = cv2.HoughLines(bimg, 1, np.pi / 180, threshold)
+    lines = lines.reshape((len(lines), 2))
+    thetas = lines[:, 1]
+    phis = np.pi / 2 - thetas
+    idx = (phis > - np.pi / 4) & (phis < np.pi / 4)
+    
+    return lines[idx]
+    
+def get_angle(bimg, bias=0):
+    
+    lines = get_lines(bimg)
+    thetas = lines[:, 1]
+    phis = np.pi / 2 - thetas
+
+    bins = np.linspace(- np.pi /4, np.pi / 4, 451)
+    freq, _ = np.histogram(phis, bins)
+
+    idx = np.argmax(freq)
+    angle = bins[idx] + bins[1] - bins[0]
+
+    return angle + bias
+
 
 if __name__ == '__main__':
-	# qc = QuestionCard('initial1.jpg')
-	qc = QuestionCard('test_pic\\20180511170808_003.jpg')
+	# qc = QuestionCard('initial.jpg')
+	qc = QuestionCard('test_pic\\20180511170804_001.jpg')
 	# 预处理图片，加载配置文件
 	qc.initial()
 	qc.load_setting('setting.json')
-	# 获取客观题答案
-	answer = qc.option_question()
-	print(answer)
+	# 获取客观题答案和主观题分数
+	qc.get_grade()
+	print(qc.answer, qc.subjective_scores, sep='\n')
+
+
