@@ -60,6 +60,7 @@ class QuestionCard(object):
 	def initial(self):
 		# 加载图片，将它转换为灰阶
 		img = cv2.imread(self.img)
+		print(img.shape)
 		gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 		self.gray = cv2.bitwise_not(gray)
 		# 二值化，图片黑白色反转
@@ -91,19 +92,19 @@ class QuestionCard(object):
 		# 截取答题卡顶部部分区域寻找试卷大定位块
 		cropTop = self.rotated[:height//10, :]
 		cropTopGray = self.rotatedGary[:height//10, :]
-		largePosBlock = detectRect(cropTop, cropTopGray, 'CropTop', 100, 190)
+		largePosBlock = detectRect(cropTop, cropTopGray, 'CropTop', width*0.05, 150)
 		# 根据大定位块，截取答题卡左右两侧寻找试卷题目定位块, 必须len(largePosBlock) == 2
 		self.left_crop_width = 100
 		self.left_base_x = largePosBlock[0][0]
 		sl = slice(self.left_base_x - self.left_crop_width, self.left_base_x)
 		cropLeft = self.rotated[:, sl]
 		cropLeftGray = self.rotatedGary[:, sl]
-		self.leftPosBlock = detectRect(cropLeft, cropLeftGray, 'CropLeft', 30, 190, 1)
+		self.leftPosBlock = detectRect(cropLeft, cropLeftGray, 'CropLeft', width*0.01, 150, 1)
 
 		self.right_base_x = largePosBlock[1][0] + largePosBlock[1][2]
 		cropRight = self.rotated[:, self.right_base_x : ]
 		cropRightGray = self.rotatedGary[:, self.right_base_x : ]
-		self.rightPosBlock = detectRect(cropRight, cropRightGray, 'CropRight', 30, 190, 1)
+		self.rightPosBlock = detectRect(cropRight, cropRightGray, 'CropRight', width*0.01, 150, 1)
 
 	''' 获取填涂答案 '''
 	# 确定一对定位块之间题目的填涂答案
@@ -120,7 +121,9 @@ class QuestionCard(object):
 			mid_x = (qr[0] + qr[0] + qr[2]) // 2    # 填涂区域的中心横向位置 (x + (x + w)) / 2
 			# print(qr[3])
 			for i, op in enumerate(options):
-				if op[0] < mid_x < op[1] and 20 < qr[3]:    # 中心位置确定选项，高度用来过滤意外的杂项
+				# if row_no == 5:
+				# 	print(op[0] , mid_x , op[1] , self.option_height , qr[3])
+				if op[0] < mid_x < op[1] + 5 and self.option_height < qr[3]:    # 中心位置确定选项，高度用来过滤意外的杂项
 					self.answer.setdefault((row_no - 1) * self.col + i // 4 + 1, []).append(answerDict.get(i % 4 + 1))
 
 	''' 得到客观题答案 '''
@@ -130,6 +133,7 @@ class QuestionCard(object):
 		for i in range(self.row):
 			lx, ly, lw, lh = self.leftPosBlock[i]
 			rx, ry, rw, rh = self.rightPosBlock[i]
+			self.option_height = lh
 
 			if max(ly+lh, ry+rh) - min(ly, ry) > max(lh, rh) + 30:
 				raise UserWarning('定位异常，请检测该答题卡')
@@ -141,7 +145,7 @@ class QuestionCard(object):
 			cropQuestionGray = self.rotatedGary[sl, start:end]
 
 			# 所有正确填涂的答案位置 (x, y, w, h)，阈值是127
-			questionRect = detectRect(cropQuestion, cropQuestionGray, 'CropQuestion%s'%(i+1), 40, 127)
+			questionRect = detectRect(cropQuestion, cropQuestionGray, 'CropQuestion%s'%(i+1), lw, 100)
 			
 			self.getAnswer(cropQuestion.shape[1], questionRect, i + 1)
 
@@ -186,7 +190,7 @@ class QuestionCard(object):
 			if len(wait_for_select) != 1:
 				raise UserWarning('主观题分数异常，请检测该答题卡')
 			self.subjective_scores.append(wait_for_select[0])
-			cv2.imwrite('CropSubjective{}.jpg'.format(i+1), cropSubjective)
+			cv2.imwrite('.\\pic\\CropSubjective{}.jpg'.format(i+1), cropSubjective)
 
 		# return self.subjective_scores
 
@@ -194,11 +198,13 @@ class QuestionCard(object):
 	def get_grade(self):
 		self.get_pos_block()
 		# 左右定位块数量不等，或定位块对数少于客观题的行数（后者仅针对横向填涂答题卡），抛出异常
-		if len(self.leftPosBlock) != len(self.rightPosBlock) or len(self.leftPosBlock) < self.row:
+		if len(self.leftPosBlock) != len(self.rightPosBlock):
 			raise UserWarning('定位异常，请检测该答题卡')
 		h, w = self.rotatedGary.shape
 		# 判断是试卷哪一页
 		if self.left_base_x > w - self.right_base_x:
+			if len(self.leftPosBlock) < self.row:
+				raise UserWarning('定位异常，请检测该答题卡')
 			self.get_option_question()
 			print('客观题填涂答案已成功获取！')
 			self.get_subjective_score()
@@ -211,7 +217,7 @@ class QuestionCard(object):
 ''' 计算指定区域内平均灰度 '''
 def aveGray(grayimg, x, y, w, h):
 	sumGray = sum(grayimg[j, i] for j in range(y+1, y+h) for i in range(x+1, x+w))
-	return sumGray // ((w - 1) * (h - 1))
+	return sumGray // ((w - 1) * (h - 1)) if (w - 1) * (h - 1) != 0 else 0
 
 
 ''' 在所有边缘检测的结果中找出需要的矩形部分 '''
@@ -222,7 +228,12 @@ def detectRect(img, grayimg, imgName='', width=30, threshold=200, sortkey=0):
 	# 将所有轮廓用矩形框出，大于一定宽度并且区域内灰度平均值大于阈值的，就是需要的定位块或者填涂块
 	for c in contours:
 		x, y, w, h = cv2.boundingRect(c)
+		# cv2.rectangle(img, (x, y), (x + w, y + h), (0, 0, 255), 2)
+		# if 'CropQuestion' in imgName:
+		# 	print(w, h, aveGray(grayimg, x, y, w, h))
 		if h > 10 and w > width and aveGray(grayimg, x, y, w, h) > threshold:
+			if 'CropQuestion' in imgName:
+				print(w, h, aveGray(grayimg, x, y, w, h))
 			cv2.rectangle(img, (x, y), (x + w, y + h), (0, 0, 255), 2)
 			posBlock.append((x, y, w, h))
 	# 保存相应的灰度图像和带矩形标记的BGR图
@@ -257,7 +268,10 @@ def get_angle(bimg, bias=0):
 
 if __name__ == '__main__':
 	# qc = QuestionCard('initial.jpg')
-	qc = QuestionCard('test_pic\\20180511170804_001.jpg')
+	# qc = QuestionCard('test_pic\\20180511170804_001.jpg')
+	# qc = QuestionCard('..\\QuestionCardPicture\\physical_8\\20180530161530_003.jpg')
+	qc = QuestionCard('..\\QuestionCardPicture\\chemistry_7\\20180530162931_001.jpg')
+	# qc = QuestionCard('..\\QuestionCardPicture\\biological_8\\20180530155554.jpg', _type='2')
 	# 预处理图片，加载配置文件
 	qc.initial()
 	qc.load_setting('setting.json')

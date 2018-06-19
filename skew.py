@@ -89,4 +89,4 @@ def main(fname):
     
 
 if __name__ == '__main__':
-    main('test_pic\\20180511170803_001.jpg')
+    main('20180530155554.jpg')
