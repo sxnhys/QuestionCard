@@ -1,16 +1,69 @@
 {
 	"1" : {
-		"row" : 6,
-		"col" : 4,
-		"num" : 23,
+		"_comment": "物理 化学",
+		"choices": [
+			{
+				"row" : 6,
+				"col" : 4,
+				"num" : 23
+			}
+		],
 		"optionType" : "A B C D"
 	},
 
 	"2" : {
-		"row" : 9,
-		"col" : 4,
-		"num" : 35,
+		"_comment": "生物",
+		"choices": [
+			{
+				"row" : 9,
+				"col" : 4,
+				"num" : 35
+			}
+		],
+		"optionType" : "A B C D"
+	},
+
+	"3" : {
+		"_comment": "地理",
+		"choices": [
+			{
+				"row" : 5,
+				"col" : 4,
+				"num" : 18
+			},
+			{
+				"row" : 2,
+				"col" : 4,
+				"num" : 8
+			}
+		],
+		"optionType" : "A B C D"
+	},
+
+	"4" : {
+		"_comment": "英语",
+		"choices": [
+			{
+				"row" : 5,
+				"col" : 4,
+				"num" : 20
+			},
+			{
+				"row" : 4,
+				"col" : 4,
+				"num" : 15
+			},
+			{
+				"row" : 5,
+				"col" : 4,
+				"num" : 20
+			},
+			{
+				"row" : 4,
+				"col" : 4,
+				"num" : 15
+			}
+		],
 		"optionType" : "A B C D"
 	}
-
 }

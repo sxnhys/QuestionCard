@@ -30,7 +30,7 @@ def get_lines(bimg, threshold=700):
     
 def get_angle(bimg, bias=0):
     
-    lines = get_lines(bimg)
+    lines = get_lines(bimg, 500)
     thetas = lines[:, 1]
     phis = np.pi / 2 - thetas
     
@@ -89,4 +89,4 @@ def main(fname):
     
 
 if __name__ == '__main__':
-    main('20180530155554.jpg')
+    main('20180530160024.jpg')
